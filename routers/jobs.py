@@ -9,9 +9,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from ..database import get_db
-from ..models import User, Job, Package, UserAccess
-from ..auth import get_current_user
+from database import get_db
+from models import User, Job, Package, UserAccess
+from auth import get_current_user
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 

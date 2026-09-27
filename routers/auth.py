@@ -98,10 +98,10 @@ from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
-from ..database import get_db
-from ..models import User, OtpVerification
-from ..schemas import UserRegisterRequest, UserLoginRequest, GoogleAuthRequest, UserResponse
-from ..auth import get_password_hash, verify_password, create_access_token, get_current_user
+from database import get_db
+from models import User, OtpVerification
+from schemas import UserRegisterRequest, UserLoginRequest, GoogleAuthRequest, UserResponse
+from auth import get_password_hash, verify_password, create_access_token, get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 

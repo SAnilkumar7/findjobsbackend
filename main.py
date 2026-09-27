@@ -61,8 +61,8 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .database import init_db
-from .routers import auth, packages, jobs, payments, access, admin, otp
+from database import init_db
+from routers import auth, packages, jobs, payments, access, admin, otp
 
 app = FastAPI(
     title="Paid Job-Access Platform API",

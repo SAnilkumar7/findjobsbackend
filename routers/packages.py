@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from ..database import get_db
-from ..models import Package
-from ..schemas import PackageResponse
+from database import get_db
+from models import Package
+from schemas import PackageResponse
 
 router = APIRouter(prefix="/api/packages", tags=["packages"])
 

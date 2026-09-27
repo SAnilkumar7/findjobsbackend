@@ -22,10 +22,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
-from ..database import get_db
-from ..models import User, Package, Payment, UserAccess
-from ..schemas import CreateOrderRequest, VerifyPaymentRequest
-from ..auth import get_current_user
+from database import get_db
+from models import User, Package, Payment, UserAccess
+from schemas import CreateOrderRequest, VerifyPaymentRequest
+from auth import get_current_user
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 logger = logging.getLogger("payments")

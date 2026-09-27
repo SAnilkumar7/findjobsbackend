@@ -6,7 +6,7 @@ Sized for high concurrent traffic (100+ concurrent users).
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from dotenv import load_dotenv
-from .models import Base
+from models import Base
 
 load_dotenv()
 

@@ -119,8 +119,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from .database import get_db
-from .models import User, Admin
+from database import get_db
+from models import User, Admin
 
 JWT_SECRET = os.getenv("JWT_SECRET", "jobaccess_super_secret_jwt_key_2026")
 ALGORITHM = "HS256"
