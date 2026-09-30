@@ -6,8 +6,8 @@ Seeds initial packages, admin account, demo user, and demo jobs across IT, Non-I
 import asyncio
 from datetime import datetime
 from passlib.context import CryptContext
-from .database import AsyncSessionLocal, init_db
-from .models import Package, Admin, User, Job, UserAccess, Payment
+from database import AsyncSessionLocal, init_db
+from models import Package, Admin, User, Job, UserAccess, Payment
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
