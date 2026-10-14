@@ -1,24 +1,22 @@
 
 
-
-
 # from typing import Optional, List
 # from datetime import datetime
 # from pydantic import BaseModel, EmailStr, Field
 
 # class SendOtpRequest(BaseModel):
-#     phone: str
+#     email: EmailStr
 
 # class VerifyOtpRequest(BaseModel):
-#     phone: str
+#     email: EmailStr
 #     otp_code: str
 
 # class UserRegisterRequest(BaseModel):
 #     name: str = Field(..., min_length=2, max_length=255)
 #     email: EmailStr
 #     password: str = Field(..., min_length=6)
-#     phone: str
 #     otp_code: str
+#     phone: Optional[str] = None
 #     age: Optional[int] = None
 #     location: Optional[str] = None
 
@@ -27,9 +25,8 @@
 #     password: str
 
 # class GoogleAuthRequest(BaseModel):
-#     email: EmailStr
-#     name: Optional[str] = None
-#     google_id: Optional[str] = None
+#     # The frontend sends the Google JWT token as 'credential'
+#     credential: str 
 
 # class UserResponse(BaseModel):
 #     id: str
@@ -138,9 +135,15 @@
 
 
 
-from typing import Optional, List
+
+
+
+
+
+
+from typing import Optional, List, Literal
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 class SendOtpRequest(BaseModel):
     email: EmailStr
@@ -208,10 +211,30 @@ class JobCreateUpdateRequest(BaseModel):
     eligibility: str
     requirements: str
     additional_information: Optional[str] = None
-    application_url: str
+    apply_method: Literal["link", "phone", "both"] = "link"
+    application_url: Optional[str] = None
+    application_phone: Optional[str] = None
     deadline: str
     status: str = "Published"
     poster_image: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_apply_fields(self):
+        # Treat empty strings as "not provided"
+        self.application_url = (self.application_url or "").strip() or None
+        self.application_phone = (self.application_phone or "").strip() or None
+
+        if self.apply_method in ("link", "both") and not self.application_url:
+            raise ValueError("Application URL is required for this apply method")
+        if self.apply_method in ("phone", "both") and not self.application_phone:
+            raise ValueError("Phone number is required for this apply method")
+
+        # Drop the unused field so stale data isn't kept
+        if self.apply_method == "link":
+            self.application_phone = None
+        elif self.apply_method == "phone":
+            self.application_url = None
+        return self
 
 class JobResponse(BaseModel):
     id: str
@@ -230,7 +253,9 @@ class JobResponse(BaseModel):
     eligibility: str
     requirements: str
     additional_information: Optional[str] = None
-    application_url: str
+    apply_method: str = "link"
+    application_url: Optional[str] = None
+    application_phone: Optional[str] = None
     deadline: str
     status: str
     created_at: datetime

@@ -1,7 +1,6 @@
 
 
 
-
 # """
 # PostgreSQL SQLAlchemy 2.0 Async Models
 # Enforces unique constraints on payment_id and (user_id, package_id)
@@ -164,12 +163,15 @@
 #     __tablename__ = "otp_verifications"
 
 #     id = Column(String, primary_key=True, default=generate_uuid)
-#     phone = Column(String(20), nullable=False, index=True)
+#     email = Column(String(255), nullable=False, index=True)
 #     otp_code = Column(String(10), nullable=False)
-#     session_id = Column(String(255), nullable=True)  # 2Factor.in tracking ID
 #     is_verified = Column(Boolean, default=False, nullable=False)
 #     expires_at = Column(DateTime, nullable=False)
 #     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+
+
 
 
 
@@ -271,7 +273,9 @@ class Job(Base):
     eligibility = Column(Text, nullable=False)
     requirements = Column(Text, nullable=False)
     additional_information = Column(Text, nullable=True)
-    application_url = Column(String(1000), nullable=False) # Direct external destination link
+    application_url = Column(String(1000), nullable=True) # Direct external destination link (optional when apply_method is "phone")
+    apply_method = Column(String(10), default="link", nullable=False) # link, phone, both
+    application_phone = Column(String(30), nullable=True) # Contact number (used when apply_method is "phone" or "both")
     deadline = Column(String(50), nullable=False)
     status = Column(String(50), default="Published", nullable=False) # Draft, Published, Archived
     created_by = Column(String(255), nullable=False)
