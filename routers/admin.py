@@ -1,3 +1,6 @@
+
+
+
 # import uuid
 # from datetime import datetime
 # from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
@@ -36,9 +39,15 @@
 # async def get_dashboard_stats(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
 #     u_count = await db.scalar(select(func.count(User.id)))
 #     j_count = await db.scalar(select(func.count(Job.id)))
-#     it_count = await db.scalar(select(func.count(Job.id)).where(Job.category_id == "it"))
-#     non_it_count = await db.scalar(select(func.count(Job.id)).where(Job.category_id == "non-it"))
-#     banking_count = await db.scalar(select(func.count(Job.id)).where(Job.category_id == "banking"))
+
+#     # One grouped query instead of three separate count queries
+#     cat_rows = await db.execute(
+#         select(Job.category_id, func.count(Job.id)).group_by(Job.category_id)
+#     )
+#     counts = dict(cat_rows.all())
+#     it_count = counts.get("it", 0)
+#     non_it_count = counts.get("non-it", 0)
+#     banking_count = counts.get("banking", 0)
 
 #     pay_count = await db.scalar(select(func.count(Payment.id)).where(Payment.status == "Successful"))
 #     total_rev = await db.scalar(select(func.sum(Payment.amount)).where(Payment.status == "Successful")) or 0
@@ -95,13 +104,15 @@
 #         eligibility=req.eligibility,
 #         requirements=req.requirements,
 #         additional_information=req.additional_information,
+#         apply_method=req.apply_method,
 #         application_url=req.application_url,
+#         application_phone=req.application_phone,
 #         deadline=req.deadline,
 #         status=req.status,
 #         created_by=admin.id,
 #         poster_image=req.poster_image,
 #     )
-#     db.add(new_job) 
+#     db.add(new_job)
 #     await db.commit()
 #     await db.refresh(new_job)
 #     return new_job
@@ -132,7 +143,9 @@
 #     job.eligibility = req.eligibility
 #     job.requirements = req.requirements
 #     job.additional_information = req.additional_information
+#     job.apply_method = req.apply_method
 #     job.application_url = req.application_url
+#     job.application_phone = req.application_phone
 #     job.deadline = req.deadline
 #     job.status = req.status
 #     if req.poster_image:
@@ -159,14 +172,19 @@
 # async def list_users(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
 #     res = await db.execute(select(User).order_by(User.created_at.desc()))
 #     users = res.scalars().all()
+
+#     # One query for all users' active packages instead of one query per user
+#     acc_res = await db.execute(
+#         select(UserAccess.user_id, Package.name)
+#         .join(Package, UserAccess.package_id == Package.id)
+#         .where(UserAccess.status == "Active")
+#     )
+#     pkgs_by_user: dict = {}
+#     for uid, name in acc_res.all():
+#         pkgs_by_user.setdefault(uid, []).append(name)
+
 #     out = []
 #     for u in users:
-#         acc_res = await db.execute(
-#             select(Package.name)
-#             .join(UserAccess, UserAccess.package_id == Package.id)
-#             .where(UserAccess.user_id == u.id, UserAccess.status == "Active")
-#         )
-#         pkgs = acc_res.scalars().all()
 #         out.append({
 #             "id": u.id,
 #             "name": u.name,
@@ -174,7 +192,7 @@
 #             "phone": u.phone,
 #             "signup_date": u.created_at,
 #             "status": u.status,
-#             "purchased_packages": pkgs,
+#             "purchased_packages": pkgs_by_user.get(u.id, []),
 #         })
 #     return out
 
@@ -250,21 +268,20 @@
 
 
 
-
-
-
-
-
 import uuid
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, delete
+from sqlalchemy.exc import IntegrityError
 from database import get_db
-from models import Admin, User, Job, Package, Payment, UserAccess
+from models import Admin, User, Job, Package, Payment, UserAccess, OtpVerification
 from schemas import JobCreateUpdateRequest, UserLoginRequest
 from auth import verify_password, create_access_token, get_current_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -468,6 +485,48 @@ async def toggle_user_status(
     user.status = new_status
     await db.commit()
     return {"success": True, "user_id": user.id, "status": user.status}
+
+@router.delete("/users/{user_id}")
+async def delete_user_permanently(
+    user_id: str,
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(User).where(User.id == user_id))
+    user = res.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        # 1. Delete rows from EVERY table that has a foreign key pointing to users
+        #    (payments, package access, and any other table linked to the user)
+        users_table = User.__table__
+        for table in reversed(User.metadata.sorted_tables):
+            if table is users_table:
+                continue
+            for fk in table.foreign_keys:
+                if fk.column.table is users_table:
+                    await db.execute(
+                        delete(table).where(fk.parent == user.id)
+                    )
+
+        # 2. Remove any OTP records for this email
+        await db.execute(
+            delete(OtpVerification).where(OtpVerification.email == user.email.lower())
+        )
+
+        # 3. Delete the user
+        await db.delete(user)
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        logger.exception("Failed to delete user %s: %s", user_id, e)
+        raise HTTPException(
+            status_code=409,
+            detail="User could not be deleted because other records still depend on it. Check the server logs.",
+        )
+
+    return {"success": True, "message": "User deleted permanently", "user_id": user_id}
 
 @router.get("/payments")
 async def list_payments(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
