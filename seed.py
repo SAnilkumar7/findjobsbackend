@@ -175,32 +175,32 @@ async def seed_database():
             await session.merge(p)
 
         # Admin (demo only)
-        admin = Admin(
-            id="adm_01",
-            name="Platform Administrator",
-            email="admin@paidjobs.com",
-            password_hash=pwd_context.hash("admin123"),
-            role="SuperAdmin",
-            status="Active",
-        )
-        await session.merge(admin)
+        # admin = Admin(
+        #     id="adm_01",
+        #     name="Platform Administrator",
+        #     email="admin@paidjobs.com",
+        #     password_hash=pwd_context.hash("admin123"),
+        #     role="SuperAdmin",
+        #     status="Active",
+        # )
+        # await session.merge(admin)
 
         # Demo User (demo only)
-        demo_user = User(
-            id="usr_demo_01",
-            name="Rahul Sharma",
-            email="jobseeker@example.com",
-            phone="+91 9876543210",
-            age=26,
-            location="Bengaluru, India",
-            profile_image="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80",
-            password_hash=pwd_context.hash("user123"),
-            status="Active",
-        )
-        await session.merge(demo_user)
+        # demo_user = User(
+        #     id="usr_demo_01",
+        #     name="Rahul Sharma",
+        #     email="jobseeker@example.com",
+        #     phone="+91 9876543210",
+        #     age=26,
+        #     location="Bengaluru, India",
+        #     profile_image="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80",
+        #     password_hash=pwd_context.hash("user123"),
+        #     status="Active",
+        # )
+        # await session.merge(demo_user)
 
-        await session.commit()
-        print("Local demo database seeded successfully!")
+        # await session.commit()
+        # print("Local demo database seeded successfully!")
 
 
 if __name__ == "__main__":
