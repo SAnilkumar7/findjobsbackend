@@ -1,6 +1,8 @@
 
 
-# import os   
+
+
+# import os
 # import asyncio
 # import secrets
 # from datetime import datetime
@@ -14,9 +16,32 @@
 # from database import get_db
 # from models import User, OtpVerification
 # from schemas import UserRegisterRequest, UserLoginRequest, GoogleAuthRequest, UserResponse
-# from auth import get_password_hash, verify_password, create_access_token, get_current_user
+# from auth import (
+#     get_password_hash,
+#     verify_password,
+#     create_access_token,
+#     get_current_user,
+#     validate_password_strength,
+# )
+# from lockout import (
+#     ensure_not_locked,
+#     register_failure,
+#     clear_failures,
+#     LOCK_MINUTES,
+# )
 
 # router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# # Used so a login for an unknown email takes the same time as a real one.
+# # Created lazily (on first use) so nothing heavy runs at import time.
+# _dummy_hash = None
+
+
+# def _get_dummy_hash() -> str:
+#     global _dummy_hash
+#     if _dummy_hash is None:
+#         _dummy_hash = get_password_hash("dummy-password-for-timing-only")
+#     return _dummy_hash
 
 
 # def set_auth_cookie(response: Response, token: str):
@@ -29,6 +54,9 @@
 # @router.post("/register", status_code=status.HTTP_201_CREATED)
 # async def register(req: UserRegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
 #     email = req.email.lower().strip()
+
+#     # Strong password rule: 8+ chars, upper, lower, number, special character
+#     validate_password_strength(req.password, email)
 
 #     existing_res = await db.execute(select(User).where(User.email == email))
 #     if existing_res.scalars().first():
@@ -78,13 +106,39 @@
 
 # @router.post("/login")
 # async def login(req: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
-#     res = await db.execute(select(User).where(User.email == req.email.lower().strip()))
+#     email = req.email.lower().strip()
+
+#     # 1) Locked? (5 wrong attempts -> 30 minute wait). Checked BEFORE the password,
+#     #    so even the correct password is refused while locked.
+#     await ensure_not_locked(db, "login", email)
+
+#     res = await db.execute(select(User).where(User.email == email))
 #     user = res.scalars().first()
-#     if not user or not verify_password(req.password, user.password_hash):
-#         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+#     try:
+#         password_ok = verify_password(
+#             req.password, user.password_hash if user else _get_dummy_hash()
+#         )
+#     except Exception:
+#         password_ok = False  # e.g. absurdly long password: treat as a wrong password
+
+#     if not user or not password_ok:
+#         # Counts the failure; raises HTTP 429 on the 5th wrong attempt
+#         remaining = await register_failure(db, "login", email)
+#         raise HTTPException(
+#             status_code=401,
+#             detail=(
+#                 f"Invalid email or password. {remaining} attempt(s) left "
+#                 f"before a {LOCK_MINUTES}-minute lock."
+#             ),
+#         )
 
 #     if user.status == "Disabled":
 #         raise HTTPException(status_code=403, detail="Account is disabled")
+
+#     # Correct password: reset the failure counter
+#     if await clear_failures(db, "login", email):
+#         await db.refresh(user)  # the commit expired the object; reload it
 
 #     token = create_access_token({"id": user.id, "email": user.email})
 #     set_auth_cookie(response, token)
@@ -177,6 +231,10 @@
 
 
 
+
+
+
+
 import os
 import asyncio
 import secrets
@@ -204,6 +262,7 @@ from lockout import (
     clear_failures,
     LOCK_MINUTES,
 )
+from referral_service import record_signup  # ADDED (creator referral)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -272,6 +331,8 @@ async def register(req: UserRegisterRequest, response: Response, db: AsyncSessio
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     await db.refresh(new_user)
+
+    await record_signup(new_user.id, req.ref_code)  # ADDED (never raises, own DB session)
 
     token = create_access_token({"id": new_user.id, "email": new_user.email})
     set_auth_cookie(response, token)
@@ -370,6 +431,7 @@ async def google_login(req: GoogleAuthRequest, response: Response, db: AsyncSess
             await db.rollback()
             raise HTTPException(status_code=409, detail="Account already exists. Please try again")
         await db.refresh(user)
+        await record_signup(user.id, req.ref_code)  # ADDED (new Google users only; never raises)
     elif not user.google_id:
         # Link Google to an existing password account with the same email
         user.google_id = google_id

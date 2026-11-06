@@ -1,10 +1,9 @@
 
-
 # import os
 # import asyncio
 # from contextlib import asynccontextmanager
 # from pathlib import Path
-# from dotenv import load_dotenv  
+# from dotenv import load_dotenv
 
 # # Must run BEFORE the imports below, because database.py and auth.py read env vars on import
 # load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -13,7 +12,7 @@
 # from fastapi.middleware.cors import CORSMiddleware
 # from fastapi.middleware.gzip import GZipMiddleware
 # from database import init_db, delete_expired_jobs
-# from routers import auth, packages, jobs, payments, access, admin, otp
+# from routers import auth, packages, jobs, payments, access, admin, otp, password_reset
 
 
 # async def _expiry_loop():
@@ -71,13 +70,11 @@
 # app.include_router(access.router)
 # app.include_router(admin.router)
 # app.include_router(otp.router)
+# app.include_router(password_reset.router)
 
 # @app.get("/api/health")
 # async def health_check():
 #     return {"status": "ok", "service": "jobaccess-fastapi"}
-
-
-
 
 
 
@@ -98,7 +95,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from database import init_db, delete_expired_jobs
-from routers import auth, packages, jobs, payments, access, admin, otp, password_reset
+from routers import auth, packages, jobs, payments, access, admin, otp, password_reset, referrals  # ADDED referrals
 
 
 async def _expiry_loop():
@@ -157,6 +154,8 @@ app.include_router(access.router)
 app.include_router(admin.router)
 app.include_router(otp.router)
 app.include_router(password_reset.router)
+app.include_router(referrals.public_router)   # ADDED
+app.include_router(referrals.admin_router)    # ADDED
 
 @app.get("/api/health")
 async def health_check():
