@@ -1,3 +1,6 @@
+
+
+
 # from typing import Optional, List, Literal
 # from datetime import datetime
 # from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -17,6 +20,7 @@
 #     phone: Optional[str] = None
 #     age: Optional[int] = None
 #     location: Optional[str] = None
+#     ref_code: Optional[str] = None  # ADDED (creator referral)
 
 # class UserLoginRequest(BaseModel):
 #     email: EmailStr
@@ -25,6 +29,7 @@
 # class GoogleAuthRequest(BaseModel):
 #     # The frontend sends the Google JWT token as 'credential'
 #     credential: str 
+#     ref_code: Optional[str] = None  # ADDED (creator referral)
 
 # class UserResponse(BaseModel):
 #     id: str
@@ -124,6 +129,7 @@
 
 # class CreateOrderRequest(BaseModel):
 #     package_id: str
+#     ref_code: Optional[str] = None  # ADDED (creator referral)
 
 # class VerifyPaymentRequest(BaseModel):
 #     package_id: str
@@ -146,6 +152,10 @@
 
 #     class Config:
 #         from_attributes = True
+
+
+
+
 
 
 
@@ -234,6 +244,7 @@ class JobCreateUpdateRequest(BaseModel):
     deadline: str
     status: str = "Published"
     poster_image: Optional[str] = None
+    rating: int = Field(default=0, ge=0, le=3)  # ADDED (stars): 0 = none, 1-3 stars
 
     @model_validator(mode="after")
     def validate_apply_fields(self):
@@ -278,6 +289,7 @@ class JobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     poster_image: Optional[str] = None
+    rating: int = 0  # ADDED (stars)
 
     class Config:
         from_attributes = True
