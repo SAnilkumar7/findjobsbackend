@@ -1,6 +1,5 @@
 
 
-
 # import uuid
 # import logging
 # from datetime import datetime
@@ -115,6 +114,7 @@
 #         status=req.status,
 #         created_by=admin.id,
 #         poster_image=req.poster_image,
+#         rating=req.rating,  # ADDED (stars)
 #     )
 #     db.add(new_job)
 #     await db.commit()
@@ -152,6 +152,7 @@
 #     job.application_phone = req.application_phone
 #     job.deadline = req.deadline
 #     job.status = req.status
+#     job.rating = req.rating  # ADDED (stars)
 #     if req.poster_image:
 #         job.poster_image = req.poster_image
 
@@ -313,26 +314,13 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 import uuid
 import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, delete
+from sqlalchemy import func, delete, text  # CHANGED: added text
 from sqlalchemy.exc import IntegrityError
 from database import get_db
 from models import Admin, User, Job, Package, Payment, UserAccess, OtpVerification
@@ -342,6 +330,60 @@ from auth import verify_password, create_access_token, get_current_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+# ---------------- ADDED: site settings storage ----------------
+DEFAULT_SETTINGS = {
+    "site_name": "FindMyJobs",
+    "site_logo": "",
+    "contact_email": "support@findmyjobs.in",
+    "contact_phone": "",
+    "currency_symbol": "₹",
+}
+PRICE_DEFAULTS = {
+    "price_it": 79,
+    "price_non_it": 69,
+    "price_banking": 59,
+    "price_all": 99,
+}
+# Package slugs that each price is synced with
+PRICE_SLUGS = {
+    "price_it": ["it"],
+    "price_non_it": ["non-it", "non_it", "nonit"],
+    "price_banking": ["banking"],
+    "price_all": ["all", "all-access", "all-access-bundle", "bundle"],
+}
+
+async def _ensure_settings_table(db: AsyncSession):
+    await db.execute(text(
+        "CREATE TABLE IF NOT EXISTS site_settings (key VARCHAR(100) PRIMARY KEY, value TEXT)"
+    ))
+    await db.commit()
+
+async def _load_settings(db: AsyncSession) -> dict:
+    await _ensure_settings_table(db)
+    rows = await db.execute(text("SELECT key, value FROM site_settings"))
+    stored = {k: v for k, v in rows.all()}
+
+    data = dict(DEFAULT_SETTINGS)
+    for k in DEFAULT_SETTINGS:
+        if k in stored and stored[k] is not None:
+            data[k] = stored[k]
+
+    for k, default in PRICE_DEFAULTS.items():
+        try:
+            data[k] = float(stored[k]) if k in stored else default
+        except (TypeError, ValueError):
+            data[k] = default
+
+    # Real package prices win when a package matches
+    pkgs = (await db.execute(select(Package))).scalars().all()
+    for pkg in pkgs:
+        slug = getattr(pkg, "slug", None)
+        for price_key, slugs in PRICE_SLUGS.items():
+            if slug in slugs and pkg.price is not None:
+                data[price_key] = float(pkg.price)
+    return data
+# --------------------------------------------------------------
 
 @router.post("/login")
 async def admin_login(req: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
@@ -363,6 +405,65 @@ async def admin_login(req: UserLoginRequest, response: Response, db: AsyncSessio
             "role": admin.role,
         },
     }
+
+# CHANGED: now returns the full saved settings (admin-only)
+@router.get("/settings")
+async def get_admin_settings(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    return await _load_settings(db)
+
+# ADDED: saves the settings page (admin-only)
+@router.put("/settings")
+async def update_admin_settings(
+    body: dict = Body(...),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    site_name = str(body.get("site_name", "")).strip()
+    contact_email = str(body.get("contact_email", "")).strip()
+    if not site_name:
+        raise HTTPException(status_code=400, detail="Site name is required")
+    if not contact_email or "@" not in contact_email:
+        raise HTTPException(status_code=400, detail="A valid contact email is required")
+
+    prices = {}
+    for key in PRICE_DEFAULTS:
+        try:
+            value = float(body.get(key))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Invalid value for {key}")
+        if value <= 0:
+            raise HTTPException(status_code=400, detail=f"{key} must be greater than 0")
+        prices[key] = value
+
+    to_store = {
+        "site_name": site_name,
+        "site_logo": str(body.get("site_logo", "") or "").strip(),
+        "contact_email": contact_email,
+        "contact_phone": str(body.get("contact_phone", "") or "").strip(),
+        "currency_symbol": str(body.get("currency_symbol", "") or "₹").strip() or "₹",
+    }
+    to_store.update({k: str(v) for k, v in prices.items()})
+
+    await _ensure_settings_table(db)
+    for k, v in to_store.items():
+        await db.execute(
+            text(
+                "INSERT INTO site_settings (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ),
+            {"k": k, "v": v},
+        )
+
+    # Keep real package prices in sync with the four prices
+    pkgs = (await db.execute(select(Package))).scalars().all()
+    for pkg in pkgs:
+        slug = getattr(pkg, "slug", None)
+        for price_key, slugs in PRICE_SLUGS.items():
+            if slug in slugs:
+                pkg.price = prices[price_key]
+
+    await db.commit()
+    return await _load_settings(db)
 
 @router.get("/stats")
 async def get_dashboard_stats(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
@@ -621,13 +722,18 @@ async def update_package_price(
     db: AsyncSession = Depends(get_db),
 ):
     new_price = body.get("price")
-    if new_price is None or float(new_price) <= 0:
+    # CHANGED: text or bad values now return 400 instead of crashing with 500
+    try:
+        price_value = float(new_price)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid price value")
+    if price_value <= 0:
         raise HTTPException(status_code=400, detail="Invalid price value")
 
     res = await db.execute(select(Package).where(Package.id == pkg_id))
     pkg = res.scalars().first()
     if not pkg:
         raise HTTPException(status_code=404, detail="Package not found")
-    pkg.price = float(new_price)
+    pkg.price = price_value
     await db.commit()
     return {"success": True, "package_id": pkg.id, "price": float(pkg.price)}
