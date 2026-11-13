@@ -1,4 +1,5 @@
 
+
 # import os
 # import asyncio
 # from contextlib import asynccontextmanager
@@ -12,7 +13,7 @@
 # from fastapi.middleware.cors import CORSMiddleware
 # from fastapi.middleware.gzip import GZipMiddleware
 # from database import init_db, delete_expired_jobs
-# from routers import auth, packages, jobs, payments, access, admin, otp, password_reset
+# from routers import auth, packages, jobs, payments, access, admin, otp, password_reset, referrals  # ADDED referrals
 
 
 # async def _expiry_loop():
@@ -71,10 +72,15 @@
 # app.include_router(admin.router)
 # app.include_router(otp.router)
 # app.include_router(password_reset.router)
+# app.include_router(referrals.public_router)   # ADDED
+# app.include_router(referrals.admin_router)    # ADDED
 
 # @app.get("/api/health")
 # async def health_check():
 #     return {"status": "ok", "service": "jobaccess-fastapi"}
+
+
+
 
 
 
@@ -94,7 +100,12 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from database import init_db, delete_expired_jobs
+# Top-level auth.py (JWT module). Only the name "limiter" is imported,
+# so it does not clash with "from routers import auth" below.
+from auth import limiter
 from routers import auth, packages, jobs, payments, access, admin, otp, password_reset, referrals  # ADDED referrals
 
 
@@ -125,6 +136,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Rate limiting (limits are applied per endpoint with @limiter.limit(...) in the routers)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Compress large responses (job lists with poster images)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -157,6 +172,9 @@ app.include_router(password_reset.router)
 app.include_router(referrals.public_router)   # ADDED
 app.include_router(referrals.admin_router)    # ADDED
 
-@app.get("/api/health")
+
+# GET and HEAD both allowed: UptimeRobot's free plan checks with HEAD.
+# No DB query here on purpose, so pings never wake Neon.
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "ok", "service": "jobaccess-fastapi"}

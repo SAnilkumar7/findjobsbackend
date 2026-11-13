@@ -1,12 +1,13 @@
 
 
+
 # import uuid
 # import logging
 # from datetime import datetime
 # from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
 # from sqlalchemy.ext.asyncio import AsyncSession
 # from sqlalchemy.future import select
-# from sqlalchemy import func, delete
+# from sqlalchemy import func, delete, text  # CHANGED: added text
 # from sqlalchemy.exc import IntegrityError
 # from database import get_db
 # from models import Admin, User, Job, Package, Payment, UserAccess, OtpVerification
@@ -16,6 +17,60 @@
 # logger = logging.getLogger(__name__)
 
 # router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+# # ---------------- ADDED: site settings storage ----------------
+# DEFAULT_SETTINGS = {
+#     "site_name": "FindMyJobs",
+#     "site_logo": "",
+#     "contact_email": "support@findmyjobs.in",
+#     "contact_phone": "",
+#     "currency_symbol": "₹",
+# }
+# PRICE_DEFAULTS = {
+#     "price_it": 79,
+#     "price_non_it": 69,
+#     "price_banking": 59,
+#     "price_all": 99,
+# }
+# # Package slugs that each price is synced with
+# PRICE_SLUGS = {
+#     "price_it": ["it"],
+#     "price_non_it": ["non-it", "non_it", "nonit"],
+#     "price_banking": ["banking"],
+#     "price_all": ["all", "all-access", "all-access-bundle", "bundle"],
+# }
+
+# async def _ensure_settings_table(db: AsyncSession):
+#     await db.execute(text(
+#         "CREATE TABLE IF NOT EXISTS site_settings (key VARCHAR(100) PRIMARY KEY, value TEXT)"
+#     ))
+#     await db.commit()
+
+# async def _load_settings(db: AsyncSession) -> dict:
+#     await _ensure_settings_table(db)
+#     rows = await db.execute(text("SELECT key, value FROM site_settings"))
+#     stored = {k: v for k, v in rows.all()}
+
+#     data = dict(DEFAULT_SETTINGS)
+#     for k in DEFAULT_SETTINGS:
+#         if k in stored and stored[k] is not None:
+#             data[k] = stored[k]
+
+#     for k, default in PRICE_DEFAULTS.items():
+#         try:
+#             data[k] = float(stored[k]) if k in stored else default
+#         except (TypeError, ValueError):
+#             data[k] = default
+
+#     # Real package prices win when a package matches
+#     pkgs = (await db.execute(select(Package))).scalars().all()
+#     for pkg in pkgs:
+#         slug = getattr(pkg, "slug", None)
+#         for price_key, slugs in PRICE_SLUGS.items():
+#             if slug in slugs and pkg.price is not None:
+#                 data[price_key] = float(pkg.price)
+#     return data
+# # --------------------------------------------------------------
 
 # @router.post("/login")
 # async def admin_login(req: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
@@ -37,6 +92,65 @@
 #             "role": admin.role,
 #         },
 #     }
+
+# # CHANGED: now returns the full saved settings (admin-only)
+# @router.get("/settings")
+# async def get_admin_settings(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+#     return await _load_settings(db)
+
+# # ADDED: saves the settings page (admin-only)
+# @router.put("/settings")
+# async def update_admin_settings(
+#     body: dict = Body(...),
+#     admin: Admin = Depends(get_current_admin),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     site_name = str(body.get("site_name", "")).strip()
+#     contact_email = str(body.get("contact_email", "")).strip()
+#     if not site_name:
+#         raise HTTPException(status_code=400, detail="Site name is required")
+#     if not contact_email or "@" not in contact_email:
+#         raise HTTPException(status_code=400, detail="A valid contact email is required")
+
+#     prices = {}
+#     for key in PRICE_DEFAULTS:
+#         try:
+#             value = float(body.get(key))
+#         except (TypeError, ValueError):
+#             raise HTTPException(status_code=400, detail=f"Invalid value for {key}")
+#         if value <= 0:
+#             raise HTTPException(status_code=400, detail=f"{key} must be greater than 0")
+#         prices[key] = value
+
+#     to_store = {
+#         "site_name": site_name,
+#         "site_logo": str(body.get("site_logo", "") or "").strip(),
+#         "contact_email": contact_email,
+#         "contact_phone": str(body.get("contact_phone", "") or "").strip(),
+#         "currency_symbol": str(body.get("currency_symbol", "") or "₹").strip() or "₹",
+#     }
+#     to_store.update({k: str(v) for k, v in prices.items()})
+
+#     await _ensure_settings_table(db)
+#     for k, v in to_store.items():
+#         await db.execute(
+#             text(
+#                 "INSERT INTO site_settings (key, value) VALUES (:k, :v) "
+#                 "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+#             ),
+#             {"k": k, "v": v},
+#         )
+
+#     # Keep real package prices in sync with the four prices
+#     pkgs = (await db.execute(select(Package))).scalars().all()
+#     for pkg in pkgs:
+#         slug = getattr(pkg, "slug", None)
+#         for price_key, slugs in PRICE_SLUGS.items():
+#             if slug in slugs:
+#                 pkg.price = prices[price_key]
+
+#     await db.commit()
+#     return await _load_settings(db)
 
 # @router.get("/stats")
 # async def get_dashboard_stats(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
@@ -295,14 +409,19 @@
 #     db: AsyncSession = Depends(get_db),
 # ):
 #     new_price = body.get("price")
-#     if new_price is None or float(new_price) <= 0:
+#     # CHANGED: text or bad values now return 400 instead of crashing with 500
+#     try:
+#         price_value = float(new_price)
+#     except (TypeError, ValueError):
+#         raise HTTPException(status_code=400, detail="Invalid price value")
+#     if price_value <= 0:
 #         raise HTTPException(status_code=400, detail="Invalid price value")
 
 #     res = await db.execute(select(Package).where(Package.id == pkg_id))
 #     pkg = res.scalars().first()
 #     if not pkg:
 #         raise HTTPException(status_code=404, detail="Package not found")
-#     pkg.price = float(new_price)
+#     pkg.price = price_value
 #     await db.commit()
 #     return {"success": True, "package_id": pkg.id, "price": float(pkg.price)}
 
@@ -314,10 +433,23 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 import uuid
+import asyncio  # ADDED (scaling)
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Body, Request  # ADDED (scaling): Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, delete, text  # CHANGED: added text
@@ -325,7 +457,14 @@ from sqlalchemy.exc import IntegrityError
 from database import get_db
 from models import Admin, User, Job, Package, Payment, UserAccess, OtpVerification
 from schemas import JobCreateUpdateRequest, UserLoginRequest
-from auth import verify_password, create_access_token, get_current_admin
+from auth import (  # ADDED (scaling): limiter, plus password helpers for the admin password feature
+    verify_password,
+    create_access_token,
+    get_current_admin,
+    limiter,
+    get_password_hash,
+    validate_password_strength,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -386,10 +525,15 @@ async def _load_settings(db: AsyncSession) -> dict:
 # --------------------------------------------------------------
 
 @router.post("/login")
-async def admin_login(req: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")  # ADDED (scaling)
+async def admin_login(request: Request, req: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):  # ADDED (scaling): request param
     res = await db.execute(select(Admin).where(Admin.email == req.email.lower().strip()))
     admin = res.scalars().first()
-    if not admin or not verify_password(req.password, admin.password_hash):
+    # ADDED (scaling): bcrypt runs in a thread so it does not freeze other requests
+    password_ok = False
+    if admin:
+        password_ok = await asyncio.to_thread(verify_password, req.password, admin.password_hash)
+    if not admin or not password_ok:
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
     token = create_access_token({"id": admin.id, "email": admin.email, "role": "Admin"})
@@ -405,6 +549,91 @@ async def admin_login(req: UserLoginRequest, response: Response, db: AsyncSessio
             "role": admin.role,
         },
     }
+
+# ---------------- ADDED (admin password feature): admins are created and managed only by a logged-in admin ----------------
+@router.get("/admins")
+async def list_admins(admin: Admin = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Admin))
+    return [
+        {"id": a.id, "name": a.name, "email": a.email, "role": a.role, "status": a.status}
+        for a in res.scalars().all()
+    ]
+
+@router.post("/admins", status_code=status.HTTP_201_CREATED)
+async def create_admin(
+    body: dict = Body(...),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    name = str(body.get("name", "")).strip()
+    email = str(body.get("email", "")).lower().strip()
+    password = str(body.get("password", ""))
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email is required")
+    validate_password_strength(password, email)  # same strong-password rule as users
+
+    existing = await db.execute(select(Admin).where(Admin.email == email))
+    if existing.scalars().first():
+        raise HTTPException(status_code=409, detail="An admin with this email already exists")
+
+    new_admin = Admin(
+        name=name,
+        email=email,
+        password_hash=await asyncio.to_thread(get_password_hash, password),
+        role="Admin",
+        status="Active",
+    )
+    db.add(new_admin)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="An admin with this email already exists")
+    await db.refresh(new_admin)
+    return {"success": True, "admin": {"id": new_admin.id, "name": new_admin.name, "email": new_admin.email, "role": new_admin.role}}
+
+@router.put("/change-password")
+@limiter.limit("5/minute")
+async def change_own_password(
+    request: Request,
+    body: dict = Body(...),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    current_password = str(body.get("current_password", ""))
+    new_password = str(body.get("new_password", ""))
+
+    ok = await asyncio.to_thread(verify_password, current_password, admin.password_hash)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    validate_password_strength(new_password, admin.email)
+
+    admin.password_hash = await asyncio.to_thread(get_password_hash, new_password)
+    await db.commit()
+    return {"success": True, "message": "Password changed successfully"}
+
+@router.put("/admins/{admin_id}/password")
+async def reset_admin_password(
+    admin_id: str,
+    body: dict = Body(...),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    new_password = str(body.get("new_password", ""))
+
+    res = await db.execute(select(Admin).where(Admin.id == admin_id))
+    target = res.scalars().first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Admin not found")
+    validate_password_strength(new_password, target.email)
+
+    target.password_hash = await asyncio.to_thread(get_password_hash, new_password)
+    await db.commit()
+    return {"success": True, "message": "Password updated", "admin_id": target.id}
+# --------------------------------------------------------------------------------------------------------------------------
 
 # CHANGED: now returns the full saved settings (admin-only)
 @router.get("/settings")

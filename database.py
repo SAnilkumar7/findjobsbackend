@@ -143,8 +143,8 @@ engine = create_async_engine(
         # Reduced from 30/70: up to 100 connections can exhaust a Neon database.
         "pool_size": 5,
         "max_overflow": 10,
-        "pool_timeout": 30,
-        "pool_recycle": 1800,
+        "pool_timeout": 10,
+        "pool_recycle": 300,
         "pool_pre_ping": True,
     })
 )

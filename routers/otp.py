@@ -204,4 +204,4 @@ async def verify_otp(req: VerifyOtpRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     _verify_attempts.pop(email, None)
 
-    return {"success": True, "message": "Email verified successfully"}
+    return {"success": True, "message": "Email verified successfully"}  

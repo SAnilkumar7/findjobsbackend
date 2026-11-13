@@ -1,7 +1,6 @@
 
 
 
-
 # import os
 # import re
 # from datetime import datetime, timedelta
@@ -108,7 +107,11 @@
 
 #     result = await db.execute(select(User).where(User.id == user_id))
 #     user = result.scalars().first()
-#     if user is None or user.status == "Disabled":
+#     # CHANGED: a token for a user that doesn't exist is an invalid login (401),
+#     # so the frontend can clear it. A disabled account stays 403.
+#     if user is None:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found. Please log in again")
+#     if user.status == "Disabled":
 #         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account disabled or deleted")
 #     return user
 
@@ -162,10 +165,6 @@
 
 
 
-
-
-
-
 import os
 import re
 from datetime import datetime, timedelta
@@ -174,6 +173,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from slowapi import Limiter  # ADDED (scaling)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from database import get_db
@@ -186,6 +186,18 @@ ACCESS_TOKEN_EXPIRE_DAYS = 7
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
+
+# ---------------- Rate limiting (ADDED for scaling) ----------------
+def client_ip(request: Request) -> str:  # ADDED (scaling)
+    """Real client IP. Behind Render/Cloudflare every request would otherwise
+    look like it comes from the same proxy IP, so one user could block everyone."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+limiter = Limiter(key_func=client_ip)  # ADDED (scaling)
 
 
 # ---------------- Strong password policy ----------------
